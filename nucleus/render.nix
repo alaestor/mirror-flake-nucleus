@@ -16,7 +16,7 @@ in
 ''
   # DO-NOT-EDIT. Generated from nucleus declarations.
   {
-    description = ${builtins.toJSON description};
+    description = ${lib.strings.escapeNixString description};
 
     outputs = ${outputsExpression};
 

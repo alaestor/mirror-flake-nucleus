@@ -36,6 +36,11 @@ let
     inherit (evaluated.config.nucleus) inputs outputsExpression;
   };
 
+  literalDescription = render {
+    description = "\${builtins.toString (1 + 1)}";
+    inherit (evaluated.config.nucleus) inputs outputsExpression;
+  };
+
   invalid = builtins.tryEval (
     builtins.deepSeq (evaluate [ { nucleus.inputs.example.url = 42; } ]).config.nucleus.inputs true
   );
@@ -48,6 +53,7 @@ assert
 assert evaluated.config.nucleus.inputs.example.url == "github:owner/example";
 assert evaluated.config.nucleus.inputs.example.inputs.nixpkgs.follows == "nixpkgs";
 assert lib.hasInfix ''description = "Fixture flake";'' rendered;
+assert lib.hasInfix ''description = "\''${builtins.toString (1 + 1)}";'' literalDescription;
 assert lib.hasInfix ''follows = "nixpkgs";'' rendered;
 assert lib.hasInfix "flake = false;" rendered;
 assert !(lib.hasInfix "null" rendered);

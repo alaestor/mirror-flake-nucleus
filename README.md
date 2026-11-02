@@ -97,6 +97,8 @@ Optionally use [fzakaria/nix-auto-follow](https://github.com/fzakaria/nix-auto-f
 ```
 
 When enabled, `write-flake` runs auto-follow after refreshing the lock, even when `flake.nix` is unchanged.
+Ignore entries must name non-aliased root inputs. An entry declared with `follows`
+causes the writer to fail and restore both files; ignore its target root input instead.
 
 Pass `--no-auto-follow` to skip it for one run. Normal lock refresh and validation rules still apply.
 `--no-check` skips lock updates and auto-follow as well as validation.

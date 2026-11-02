@@ -38,11 +38,14 @@ nix build ".#checks.$system.nucleus" --no-link
 
 # The remote writer must use this project's declarations, not its own inputs.
 cat > modules/smoke.nix <<'NIX'
-{ lib, ... }: { nucleus.description = lib.mkForce "Smoke-tested nucleus project"; }
+{ lib, ... }: {
+  nucleus.description = lib.mkForce "Literal \${builtins.toString (1 + 1)} with \"quotes\", \\ and\na newline";
+}
 NIX
 git add modules/smoke.nix
 nix run "$source_dir#write-flake"
-test "$(nix eval --raw --file flake.nix description)" = 'Smoke-tested nucleus project'
+expected_description=$'Literal ${builtins.toString (1 + 1)} with "quotes", \\ and\na newline'
+test "$(nix eval --raw --file flake.nix description)" = "$expected_description"
 
 # Recovery uses and preserves an existing, project-owned copy.
 printf '\n# Project-owned customization\n' >> nucleus/bootstrap.sh
@@ -52,7 +55,7 @@ index_before="$(git ls-files -s)"
 nix run "$source_dir#bootstrap"
 test "$(git ls-files -s)" = "$index_before"
 cmp nucleus/bootstrap.sh "$work/owned-bootstrap.sh"
-test "$(nix eval --raw --file flake.nix description)" = 'Smoke-tested nucleus project'
+test "$(nix eval --raw --file flake.nix description)" = "$expected_description"
 shopt -s nullglob
 backups=(flake.nix.pre-bootstrap.*)
 test "${#backups[@]}" -eq 1
@@ -77,6 +80,7 @@ write_auto_follow_module() {
     autoFollow = { enable = true; ignore = [ $1 ]; };
     inputs.shared.url = "path:$work/canonical";
     inputs.consumer.url = "path:$work/consumer";
+    inputs.alias.follows = "consumer";
   };
 }
 NIX
@@ -99,6 +103,38 @@ shared_marker() {
 test "$(shared_marker)" = alternative
 nix run .#write-flake
 test "$(shared_marker)" = alternative
+
+# Ignoring a follows alias fails without changing either active file.
+write_auto_follow_module '"alias"'
+cp flake.nix "$work/before-alias.nix"
+cp flake.lock "$work/before-alias.lock"
+if TMPDIR="$work" nix run .#write-flake > "$work/alias.log" 2>&1; then
+  echo 'writer accepted an ignored follows alias' >&2
+  exit 1
+fi
+cmp flake.nix "$work/before-alias.nix"
+cmp flake.lock "$work/before-alias.lock"
+artifact_dir=''
+while IFS= read -r line; do
+  if [[ $line == 'Artifacts: '* ]]; then
+    artifact_dir="${line#Artifacts: }"
+  fi
+done < "$work/alias.log"
+if [[ -z $artifact_dir ]]; then
+  cat "$work/alias.log" >&2
+  exit 1
+fi
+validation_log="$(cat "$artifact_dir/validation.log")"
+if [[ $validation_log != *'nucleus.autoFollow.ignore contains follows aliases: alias.'* ]]; then
+  printf '%s\n' "$validation_log" >&2
+  exit 1
+fi
+test "$(shared_marker)" = alternative
+# Bypasses still work even when the ignore policy is invalid.
+nix run .#write-flake -- --no-auto-follow
+nix run .#write-flake -- --no-check
+cmp flake.lock "$work/before-alias.lock"
+
 write_auto_follow_module ''
 # The policy changed but generated flake.nix did not. Still rewrite the lock.
 cp flake.nix "$work/before-auto-follow.nix"

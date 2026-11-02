@@ -98,6 +98,9 @@ in
       { pkgs, system, ... }:
       let
         generated = pkgs.writeText "flake.nix" rendered;
+        ignoredAliases = lib.filter (
+          name: (cfg.inputs.${name}.follows or null) != null
+        ) cfg.autoFollow.ignore;
         # Defer package evaluation and realization until the writer invokes it.
         # A store-path dependency on the package would build it before flag parsing.
         autoFollow =
@@ -105,19 +108,24 @@ in
             lib.getExe (pkgs.writeShellApplication {
               name = "nucleus-auto-follow";
               runtimeInputs = [ pkgs.nix ];
-              text = ''
-                exec nix run --impure --expr ${lib.escapeShellArg ''
-                  let
-                    pkgs = import ${pkgs.path} {
-                      system = ${builtins.toJSON system};
-                      config = { };
-                      overlays = [ ];
-                    };
-                  in pkgs.callPackage ${./auto-follow.nix} { }
-                ''} "" -- --in-place ${lib.escapeShellArgs (
-                  lib.concatMap (name: [ "--ignore" name ]) cfg.autoFollow.ignore
-                )} flake.lock
-              '';
+              text =
+                if ignoredAliases != [ ] then ''
+                  printf '%s\n' ${lib.escapeShellArg "nucleus.autoFollow.ignore contains follows aliases: ${lib.concatStringsSep ", " ignoredAliases}. Ignore a non-aliased root input instead."} >&2
+                  exit 1
+                ''
+                else ''
+                  exec nix run --impure --expr ${lib.escapeShellArg ''
+                    let
+                      pkgs = import ${pkgs.path} {
+                        system = ${builtins.toJSON system};
+                        config = { };
+                        overlays = [ ];
+                      };
+                    in pkgs.callPackage ${./auto-follow.nix} { }
+                  ''} "" -- --in-place ${lib.escapeShellArgs (
+                    lib.concatMap (name: [ "--ignore" name ]) cfg.autoFollow.ignore
+                  )} flake.lock
+                '';
             })
           else
             "";
