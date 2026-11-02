@@ -83,6 +83,24 @@ Regenerate with `nix run .#write-flake` rather than editing `flake.nix`.
 When the flake changes, the writer refreshes the lock and runs `nix flake check --no-build`,
 restoring the previous flake and lock if either step fails.
 
+#### Automatic input following
+
+Optionally use [fzakaria/nix-auto-follow](https://github.com/fzakaria/nix-auto-follow) to unify dependencies with same-named root inputs. This reduces duplication but overrides upstream dependency pins, which may break compatibility. The pinned package is evaluated and built only if you use the feature.
+
+```nix
+{
+  nucleus.autoFollow = {
+    enable = true; # Disabled by default
+    ignore = [ "my-special-input" ]; # Optional: preserve this root input's subtree.
+  };
+}
+```
+
+When enabled, `write-flake` runs auto-follow after refreshing the lock, even when `flake.nix` is unchanged.
+
+Pass `--no-auto-follow` to skip it for one run. Normal lock refresh and validation rules still apply.
+`--no-check` skips lock updates and auto-follow as well as validation.
+
 ### Your Nucleus
 
 Tweak it however you want to fit your project's needs. Change the module discovery rules and add directories to import, or edit the minimal seed flake to include additional inputs that may be a prerequisite for evaluating your modules.

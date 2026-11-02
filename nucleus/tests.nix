@@ -53,6 +53,13 @@ assert lib.hasInfix "flake = false;" rendered;
 assert !(lib.hasInfix "null" rendered);
 assert !(lib.hasInfix "inputs = { };" rendered);
 assert !invalid.success;
+assert !(evaluate [ ]).config.nucleus.autoFollow.enable;
+assert (evaluate [ ]).config.nucleus.autoFollow.ignore == [ ];
+assert (evaluate [ { nucleus.autoFollow.enable = true; } ]).config.nucleus.autoFollow.enable;
+assert lib.sort builtins.lessThan (evaluate [
+  { nucleus.autoFollow.ignore = [ "first" ]; }
+  { nucleus.autoFollow.ignore = [ "second" ]; }
+]).config.nucleus.autoFollow.ignore == [ "first" "second" ];
 {
   inherit discovered rendered;
 }

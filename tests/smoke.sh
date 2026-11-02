@@ -11,6 +11,8 @@ cd "$work/manual"
 cp -R "$source_dir/nucleus" nucleus
 # Pin test dependencies without putting a lock file in the vendored directory.
 cp "$source_dir/flake.lock" flake.lock
+cp nucleus/auto-follow.nix "$work/disabled-auto-follow.nix"
+printf '%s\n' 'throw "disabled auto-follow package must stay unevaluated"' > nucleus/auto-follow.nix
 
 git init -q
 printf '%s\n' existing > existing.txt
@@ -56,6 +58,55 @@ backups=(flake.nix.pre-bootstrap.*)
 test "${#backups[@]}" -eq 1
 test "$(cat "${backups[0]}")" = broken
 git diff --check
+
+# Bootstrap skips auto-follow; the writer protects ignored dependency subtrees.
+cp "$work/disabled-auto-follow.nix" nucleus/auto-follow.nix
+mkdir -p "$work/canonical" "$work/alternative" "$work/consumer"
+printf '%s\n' '{ outputs = _: { marker = "canonical"; }; }' > "$work/canonical/flake.nix"
+printf '%s\n' '{ outputs = _: { marker = "alternative"; }; }' > "$work/alternative/flake.nix"
+cat > "$work/consumer/flake.nix" <<NIX
+{
+  inputs.shared.url = "path:$work/alternative";
+  outputs = _: { };
+}
+NIX
+write_auto_follow_module() {
+  cat > modules/auto-follow.nix <<NIX
+{
+  nucleus = {
+    autoFollow = { enable = true; ignore = [ $1 ]; };
+    inputs.shared.url = "path:$work/canonical";
+    inputs.consumer.url = "path:$work/consumer";
+  };
+}
+NIX
+}
+write_auto_follow_module '"consumer"'
+git add modules/auto-follow.nix
+# A throwing package proves bypasses never evaluate it or require its build.
+cp nucleus/auto-follow.nix "$work/auto-follow.nix"
+printf '%s\n' 'throw "auto-follow package must stay unevaluated"' > nucleus/auto-follow.nix
+nix run "$source_dir#bootstrap"
+printf '%s\n' '{ nucleus.inputs.bypass.follows = "shared"; }' > modules/bypass.nix
+git add modules/bypass.nix
+nix run .#write-flake -- --no-auto-follow
+nix run .#write-flake -- --no-check
+cp "$work/auto-follow.nix" nucleus/auto-follow.nix
+bash nucleus/bootstrap.sh
+shared_marker() {
+  nix eval --impure --raw --expr '(builtins.getFlake (toString ./.)).inputs.consumer.inputs.shared.marker'
+}
+test "$(shared_marker)" = alternative
+nix run .#write-flake
+test "$(shared_marker)" = alternative
+write_auto_follow_module ''
+# The policy changed but generated flake.nix did not. Still rewrite the lock.
+cp flake.nix "$work/before-auto-follow.nix"
+nix run .#write-flake
+cmp flake.nix "$work/before-auto-follow.nix"
+test "$(shared_marker)" = canonical
+nix run .#write-flake
+test "$(shared_marker)" = canonical
 
 # The remote bootstrap can also install into a fresh, non-Git project.
 cd "$work/helper"

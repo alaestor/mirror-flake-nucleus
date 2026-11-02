@@ -2,31 +2,35 @@
 set -euo pipefail
 
 usage() {
-  printf '%s\n' 'Usage: write-flake [--no-check]'
+  printf '%s\n' 'Usage: write-flake [--no-check] [--no-auto-follow]'
   printf '%s\n' ''
   printf '%s\n' 'Generate flake.nix transactionally.'
   printf '%s\n' '  --no-check  Install the generated file without validation or lock updates.'
   printf '%s\n' '              flake.lock is left untouched; run nix flake lock yourself'
   printf '%s\n' '              afterwards if the change affects it (bootstrap.sh does this).'
+  printf '%s\n' '  --no-auto-follow Skip auto-follow for this run without disabling validation.'
 }
 
 skip_check=0
-if (( $# > 1 )); then
-  usage >&2
-  exit 2
+skip_auto_follow=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-check) skip_check=1 ;;
+    --no-auto-follow) skip_auto_follow=1 ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if (( skip_auto_follow )); then
+  unset NUCLEUS_AUTO_FOLLOW
 fi
-case "${1-}" in
-  "") ;;
-  --no-check) skip_check=1 ;;
-  -h|--help)
-    usage
-    exit 0
-    ;;
-  *)
-    usage >&2
-    exit 2
-    ;;
-esac
 
 : "${NUCLEUS_GENERATED:?NUCLEUS_GENERATED must name the generated flake}"
 : "${NUCLEUS_NIX:?NUCLEUS_NIX must name the nix executable}"
@@ -48,7 +52,8 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
   fi
 fi
 
-if cmp -s "$NUCLEUS_GENERATED" flake.nix; then
+if cmp -s "$NUCLEUS_GENERATED" flake.nix \
+  && { (( skip_check )) || [[ -z ${NUCLEUS_AUTO_FOLLOW:-} ]]; }; then
   printf '%s\n' 'flake.nix is already current.'
   exit 0
 fi
@@ -95,8 +100,15 @@ trap 'exit 130' HUP INT TERM
 cp "$NUCLEUS_GENERATED" flake.nix
 chmod u+w flake.nix
 
-if ! "$NUCLEUS_NIX" flake lock --output-lock-file "$PWD/flake.lock" >"$log_file" 2>&1 \
-  || ! "$NUCLEUS_NIX" flake check --no-build --no-write-lock-file >>"$log_file" 2>&1; then
+refresh_lock() {
+  "$NUCLEUS_NIX" flake lock --output-lock-file "$PWD/flake.lock" || return
+  if [[ -n ${NUCLEUS_AUTO_FOLLOW:-} ]]; then
+    "$NUCLEUS_AUTO_FOLLOW" || return
+  fi
+  "$NUCLEUS_NIX" flake check --no-build --no-write-lock-file || return
+}
+
+if ! refresh_lock >"$log_file" 2>&1; then
   cp flake.nix "$artifact_dir/flake.nix.bad"
   if [[ -f flake.lock ]]; then
     cp flake.lock "$artifact_dir/flake.lock.bad"
@@ -111,4 +123,4 @@ fi
 restoration_needed=0
 trap - EXIT HUP INT TERM
 rm -rf "$artifact_dir"
-printf '%s\n' 'Updated and validated flake.nix.'
+printf '%s\n' 'Updated and validated flake.nix and flake.lock.'
